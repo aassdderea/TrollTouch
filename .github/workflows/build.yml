@@ -17,18 +17,18 @@ jobs:
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
       - name: Install ldid
-        run: |
-          brew install ldid
+        run: brew install ldid
 
-      - name: Build
+      - name: Build dylib
         run: |
           export THEOS=$HOME/theos
-          make package
+          make clean package
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: TrollTouch-build
           path: |
-            packages/*.dylib
-            .theos/obj/debug/*.dylib
+            packages/TrollTouch.dylib
+            scripts/*.sh
+            README.md

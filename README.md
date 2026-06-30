@@ -1,21 +1,29 @@
 # TrollTouch
 
-基于 TrollFools 注入的简单点击插件。
+适配 TrollFools 的注入版点击插件。
 
-## 构建
-- 本地: `make package`
-- GitHub Actions: 推送后自动构建
+## 编译
+- 推送到 GitHub 后自动执行 `.github/workflows/build.yml`
+- 产物里会上传 `packages/TrollTouch.dylib`
 
-## 注入
-- 将产物 `TrollTouch.dylib` 与 `TrollTouch.plist` 注入目标 App
-- 默认过滤示例是 Safari 和设置，可自行改 `layout/Library/MobileSubstrate/DynamicLibraries/TrollTouch.plist`
+## TrollFools 使用
+1. 选择目标 App
+2. 注入 `TrollTouch.dylib`
+3. 重启目标 App
+4. 先执行 `ping.sh` 确认 dylib 已加载
+5. 再执行 `tap.sh x y duration`
 
-## 触发点击
+## 命令文件
+- 指令文件: `/var/mobile/Library/Preferences/com.trolltouch.command.plist`
+- 结果文件: `/var/mobile/Library/Preferences/com.trolltouch.result.plist`
+
+## 示例
 ```sh
-sh scripts/tap.sh 200 400 0.05
+sh ping.sh
+sh tap.sh 200 400 0.05
 ```
 
-## 原理
-- 注入目标进程
-- 通过通知读取 `/var/mobile/Library/Preferences/com.trolltouch.command.plist`
-- 在主线程构造 `UITouch/UITouchesEvent` 并发送
+## 关键文件
+- 注入逻辑: `TrollTouch.m`
+- 构建配置: `Makefile`
+- GitHub Actions: `.github/workflows/build.yml`
