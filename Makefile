@@ -12,7 +12,7 @@ TrollTouch_CODESIGN_FLAGS = -Sentitlements.plist
 include $(THEOS_MAKE_PATH)/application.mk
 
 ipa: TrollTouch
-	ldid -Sentitlements.plist $(THEOS_OBJ_DIR)/TrollTouch.app/TrollTouch 2>/dev/null || true
+	ldid -P -Sentitlements.plist $(THEOS_OBJ_DIR)/TrollTouch.app/TrollTouch 2>/dev/null || true
 	@mkdir -p packages/Payload
 	@cp -r $(THEOS_OBJ_DIR)/TrollTouch.app packages/Payload/
 	@cd packages && zip -r TrollTouch.ipa Payload/
