@@ -312,16 +312,21 @@ static void TTLoadIOKit(void) {
 
 - (void)showTapDotAtPoint:(CGPoint)p onWindow:(UIWindow *)host {
     if (!host) return;
-    CGFloat s = 44.0;
+    CGFloat s = 56.0;
     UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(p.x - s/2, p.y - s/2, s, s)];
-    dot.backgroundColor = [UIColor colorWithRed:1.0 green:0.18 blue:0.18 alpha:0.22];
-    dot.layer.borderColor = [UIColor colorWithRed:1.0 green:0.18 blue:0.18 alpha:0.9].CGColor;
-    dot.layer.borderWidth = 3.0;
+    dot.backgroundColor = [UIColor colorWithRed:1.0 green:0.12 blue:0.12 alpha:0.30];
+    dot.layer.borderColor = [UIColor.whiteColor colorWithAlphaComponent:0.9].CGColor;
+    dot.layer.borderWidth = 3.5;
     dot.layer.cornerRadius = s / 2;
+    dot.layer.shadowColor = [UIColor.redColor CGColor];
+    dot.layer.shadowOffset = CGSizeZero;
+    dot.layer.shadowRadius = 6;
+    dot.layer.shadowOpacity = 0.7;
     dot.userInteractionEnabled = NO;
     [host addSubview:dot];
-    [UIView animateWithDuration:0.55 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
-        dot.transform = CGAffineTransformMakeScale(1.6, 1.6);
+    [host bringSubviewToFront:dot];
+    [UIView animateWithDuration:0.7 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        dot.transform = CGAffineTransformMakeScale(1.5, 1.5);
         dot.alpha = 0.0;
     } completion:^(BOOL f) { [dot removeFromSuperview]; }];
 }
