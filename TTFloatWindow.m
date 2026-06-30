@@ -171,7 +171,7 @@ static void TTLoadIOKit(void) {
 - (BOOL)tapAtPoint:(CGPoint)point {
     UIWindow *host = [self _hostWindow];
     if (!host) {
-        self.statusLabel.text = @"❌ window_not_found";
+        self.statusLabel.text = @"没有找到宿主窗口";
         return NO;
     }
 
@@ -180,6 +180,7 @@ static void TTLoadIOKit(void) {
         target = host;
     }
 
+    [self showTapDotAtPoint:point onWindow:host];
     NSString *cls = NSStringFromClass(target.class);
 
     BOOL activated = [target accessibilityActivate];
@@ -203,11 +204,27 @@ static void TTLoadIOKit(void) {
         return YES;
     }
 
-    self.statusLabel.text = [NSString stringWithFormat:@"⚠️ all failed\n(%@)", cls];
+    self.statusLabel.text = [NSString stringWithFormat:@"⚠️ 全部失败\n(%@)", cls];
     return NO;
 }
 
 #pragma mark - HID
+
+- (SEL)_findEnqueueSelector {
+    NSArray *candidates = @[
+        @"_enqueueHIDEvent:",
+        @"_handleHIDEvent:",
+        @"enqueueHIDEvent:"
+    ];
+    UIApplication *app = [UIApplication sharedApplication];
+    for (NSString *name in candidates) {
+        SEL sel = NSSelectorFromString(name);
+        if ([app respondsToSelector:sel]) {
+            return sel;
+        }
+    }
+    return NULL;
+}
 
 - (BOOL)tapHIDAtPoint:(CGPoint)point {
     TTLoadIOKit();
@@ -215,11 +232,11 @@ static void TTLoadIOKit(void) {
         return NO;
     }
 
-    SEL sel = NSSelectorFromString(@"_enqueueHIDEvent:");
-    UIApplication *app = [UIApplication sharedApplication];
-    if (![app respondsToSelector:sel]) {
+    SEL sel = [self _findEnqueueSelector];
+    if (!sel) {
         return NO;
     }
+    UIApplication *app = [UIApplication sharedApplication];
     typedef void (*EnqueueFn)(id, SEL, IOHIDEventRef);
     EnqueueFn enqueue = (EnqueueFn)[app methodForSelector:sel];
 
@@ -227,45 +244,73 @@ static void TTLoadIOKit(void) {
         kCFAllocatorDefault,
         mach_absolute_time(),
         kDigitizerFinger,
-        0,       // index
-        1,       // identity
-        kDigitizerEventRange | kDigitizerEventTouch,
-        0,       // buttonMask
+        0,
+        1,
+        kDigitizerEventRange | kDigitizerEventTouch | kDigitizerEventAttribute,
+        0,
         point.x, point.y, 0.0,
-        0.0,     // tipPressure
-        0.0,     // barrelPressure
-        true,    // range
-        true,    // touch
-        0        // options
+        0.1,    // tipPressure
+        0.0,
+        true,   // range
+        true,   // touch
+        0
     );
 
     if (IOHIDEventSetFloatValue) {
-        IOHIDEventSetFloatValue(down, 0x50000, (float)point.x); // kIOHIDEventFieldDigitizerX
-        IOHIDEventSetFloatValue(down, 0x50001, (float)point.y); // kIOHIDEventFieldDigitizerY
+        IOHIDEventSetFloatValue(down, 720896, (float)point.x);
+        IOHIDEventSetFloatValue(down, 720897, (float)point.y);
     }
 
     enqueue(app, sel, down);
 
-    IOHIDEventRef up = IOHIDEventCreateDigitizerEvent(
-        kCFAllocatorDefault,
-        mach_absolute_time(),
-        kDigitizerFinger,
-        0, 1,
-        kDigitizerEventRange | kDigitizerEventTouch,
-        0,
-        point.x, point.y, 0.0,
-        0.0, 0.0,
-        true,   // range
-        false,  // touch = 0
-        0
-    );
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(50 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        IOHIDEventRef up = IOHIDEventCreateDigitizerEvent(
+            kCFAllocatorDefault,
+            mach_absolute_time(),
+            kDigitizerFinger,
+            0, 1,
+            kDigitizerEventRange | kDigitizerEventTouch | kDigitizerEventAttribute,
+            0,
+            point.x, point.y, 0.0,
+            0.0, 0.0,
+            true,
+            false,
+            0
+        );
 
-    enqueue(app, sel, up);
+        if (IOHIDEventSetFloatValue) {
+            IOHIDEventSetFloatValue(up, 720896, (float)point.x);
+            IOHIDEventSetFloatValue(up, 720897, (float)point.y);
+        }
+
+        enqueue(app, sel, up);
+        CFRelease(up);
+    });
 
     CFRelease(down);
-    CFRelease(up);
 
+    UIWindow *host = [self _hostWindow];
+    [self showTapDotAtPoint:point onWindow:host];
     return YES;
+}
+
+- (void)showTapDotAtPoint:(CGPoint)point onWindow:(UIWindow *)host {
+    if (!host) return;
+    CGFloat size = 32.0;
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(point.x - size / 2.0, point.y - size / 2.0, size, size)];
+    dot.backgroundColor = [UIColor colorWithRed:1.0 green:0.15 blue:0.15 alpha:0.25];
+    dot.layer.borderColor = [UIColor colorWithRed:1.0 green:0.15 blue:0.15 alpha:0.85].CGColor;
+    dot.layer.borderWidth = 2.5;
+    dot.layer.cornerRadius = size / 2.0;
+    dot.userInteractionEnabled = NO;
+    [host addSubview:dot];
+
+    [UIView animateWithDuration:0.45 animations:^{
+        dot.transform = CGAffineTransformMakeScale(1.8, 1.8);
+        dot.alpha = 0.0;
+    } completion:^(BOOL finished) {
+        [dot removeFromSuperview];
+    }];
 }
 
 #pragma mark - actions
@@ -277,12 +322,28 @@ static void TTLoadIOKit(void) {
 - (void)doSwipeTest {
     self.statusLabel.text = @"Swipe...";
     dispatch_async(dispatch_get_main_queue(), ^{
-        for (NSInteger i = 0; i <= 10; i++) {
-            CGFloat ty = 600.0 - (i / 10.0) * 300.0;
-            [self tapHIDAtPoint:CGPointMake(200, ty)];
-            usleep(16000);
-        }
+        [self runSwipeFrom:CGPointMake(200, 600) to:CGPointMake(200, 300) steps:10 interval:0.018];
+    });
+}
+
+- (void)runSwipeFrom:(CGPoint)from to:(CGPoint)to steps:(NSInteger)steps interval:(NSTimeInterval)interval {
+    [self dispatchSwipeStepFrom:from to:to step:0 total:steps interval:interval];
+}
+
+- (void)dispatchSwipeStepFrom:(CGPoint)from to:(CGPoint)to step:(NSInteger)step total:(NSInteger)total interval:(NSTimeInterval)interval {
+    if (step > total) {
         self.statusLabel.text = @"✅ Swipe done";
+        return;
+    }
+    CGFloat ratio = (CGFloat)step / (CGFloat)total;
+    CGPoint point = CGPointMake(
+        from.x + (to.x - from.x) * ratio,
+        from.y + (to.y - from.y) * ratio
+    );
+    [self tapHIDAtPoint:point];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(interval * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self dispatchSwipeStepFrom:from to:to step:step + 1 total:total interval:interval];
     });
 }
 
