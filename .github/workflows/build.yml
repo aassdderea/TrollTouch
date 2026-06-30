@@ -22,7 +22,7 @@ jobs:
       - name: Build dylib
         run: |
           export THEOS=$HOME/theos
-          make clean package
+          make clean stage
 
       - name: Upload dylib
         uses: actions/upload-artifact@v4
