@@ -8,6 +8,7 @@ LIBRARY_NAME = TrollTouch
 TrollTouch_FILES = TrollTouch.m TTFloatWindow.m
 TrollTouch_FRAMEWORKS = UIKit Foundation
 TrollTouch_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
+TrollTouch_LDFLAGS += -framework IOKit
 TrollTouch_INSTALL_PATH = /usr/lib
 
 include $(THEOS_MAKE_PATH)/library.mk
