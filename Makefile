@@ -5,7 +5,7 @@ FINALPACKAGE = 0
 include $(THEOS)/makefiles/common.mk
 
 LIBRARY_NAME = TrollTouch
-TrollTouch_FILES = TrollTouchMinimal.m
+TrollTouch_FILES = TrollTouch.m TTFloatWindow.m
 TrollTouch_FRAMEWORKS = UIKit Foundation
 TrollTouch_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 TrollTouch_INSTALL_PATH = /usr/lib
