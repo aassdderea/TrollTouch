@@ -30,5 +30,4 @@ jobs:
           name: TrollTouch-build
           path: |
             packages/TrollTouch.dylib
-            scripts/*.sh
             README.md
