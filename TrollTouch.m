@@ -119,6 +119,12 @@ static void TTAutoScanTick(void) {
     }
 }
 
+static void TTStopScan(void) {
+    [_scanTimer invalidate];
+    _scanTimer = nil;
+    _currentMode = @"idle";
+}
+
 static void TTStartAutoScan(void) {
     TTStopScan();
     _currentMode = @"auto";
@@ -127,12 +133,6 @@ static void TTStartAutoScan(void) {
     }];
     [[NSRunLoop mainRunLoop] addTimer:_scanTimer forMode:NSRunLoopCommonModes];
     TTLog(@"自动扫描已启动 (间隔1秒)");
-}
-
-static void TTStopScan(void) {
-    [_scanTimer invalidate];
-    _scanTimer = nil;
-    _currentMode = @"idle";
 }
 
 #pragma mark - HID
