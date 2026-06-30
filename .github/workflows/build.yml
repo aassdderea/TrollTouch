@@ -10,26 +10,18 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Theos
         run: |
           git clone --recursive https://github.com/theos/theos.git $HOME/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
-
       - name: Install ldid
         run: brew install ldid
-
-      - name: Build dylib
+      - name: Build IPA
         run: |
           export THEOS=$HOME/theos
-          make clean stage
-
-      - name: Upload dylib
+          make clean all
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: TrollTouch-dylib
-          path: |
-            packages/TrollTouch.dylib
-            packages/entitlements.plist
-            scripts/*.sh
-            README.md
+          name: TrollTouch-IPA
+          path: packages/TrollTouch.ipa

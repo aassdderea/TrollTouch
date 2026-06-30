@@ -1,19 +1,21 @@
 TARGET := iphone:clang:latest:15.0
 ARCHS := arm64 arm64e
-FINALPACKAGE = 0
 
 include $(THEOS)/makefiles/common.mk
 
-LIBRARY_NAME = TrollTouch
-TrollTouch_FILES = TrollTouch.m
+APPLICATION_NAME = TrollTouch
+TrollTouch_FILES = main.m AppDelegate.m ViewController.m TTAXController.m
 TrollTouch_FRAMEWORKS = UIKit Foundation
 TrollTouch_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-error -Wno-unused-variable
-TrollTouch_INSTALL_PATH = /usr/lib
+TrollTouch_CODESIGN_FLAGS = -Pentitlements.plist
 
-include $(THEOS_MAKE_PATH)/library.mk
+include $(THEOS_MAKE_PATH)/application.mk
 
-after-TrollTouch-stage::
-	@mkdir -p packages
-	@cp $(THEOS_OBJ_DIR)/TrollTouch.dylib packages/TrollTouch.dylib
-	@cp entitlements.plist packages/ 2>/dev/null || true
-	@echo ">>> packages/TrollTouch.dylib ready"
+ipa: TrollTouch
+	ldid -Pentitlements.plist $(THEOS_OBJ_DIR)/TrollTouch.app/TrollTouch 2>/dev/null || true
+	@mkdir -p packages/Payload
+	@cp -r $(THEOS_OBJ_DIR)/TrollTouch.app packages/Payload/
+	@cd packages && zip -r TrollTouch.ipa Payload/
+	@echo ">>> packages/TrollTouch.ipa ready"
+
+all:: ipa
