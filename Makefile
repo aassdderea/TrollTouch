@@ -6,7 +6,7 @@ include $(THEOS)/makefiles/common.mk
 APPLICATION_NAME = TrollTouch
 TrollTouch_FILES = main.m AppDelegate.m ViewController.m TTHIDController.m
 TrollTouch_FRAMEWORKS = UIKit Foundation AVFoundation
-TrollTouch_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
+TrollTouch_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-error -Wno-unused-variable
 TrollTouch_CODESIGN_FLAGS = -Sentitlements.plist
 
 include $(THEOS_MAKE_PATH)/application.mk

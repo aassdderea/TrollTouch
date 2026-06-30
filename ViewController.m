@@ -23,7 +23,6 @@
 
     CGFloat w = self.view.bounds.size.width;
     CGFloat pad = 16.0, y = 40.0, btnH = 36.0;
-    UIFont *f = [UIFont systemFontOfSize:14];
 
     // 标题
     UILabel *t = [[UILabel alloc] initWithFrame:CGRectMake(pad, y, w - pad * 2, 22)];
@@ -41,6 +40,7 @@
     y += btnH + 6;
 
     UIButton *tapBtn = [self btnAtX:pad y:y width:w - pad * 2 height:btnH title:@"单次 Tap" color:[UIColor colorWithRed:0.15 green:0.55 blue:0.9 alpha:1.0] sel:@selector(doTap) toView:_scrollView];
+    (void)tapBtn;
     y += btnH + 6;
 
     UIButton *startBtn = [self btnAtX:pad y:y width:(w - pad * 3) / 2 height:btnH title:@"开始循环" color:[UIColor colorWithRed:0.1 green:0.7 blue:0.4 alpha:1.0] sel:@selector(doStart) toView:_scrollView];
