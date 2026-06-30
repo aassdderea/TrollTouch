@@ -20,6 +20,7 @@ static int  (*pSystemClientDispatch)(IOHIDEventSystemClientRef, IOHIDEventRef) =
 @interface TTHIDController ()
 @property (nonatomic, assign) IOHIDEventSystemClientRef client;
 @property (nonatomic, assign) BOOL repeating;
+@property (nonatomic, copy) void(^logBlock)(NSString *);
 @end
 
 @implementation TTHIDController
@@ -30,6 +31,9 @@ static int  (*pSystemClientDispatch)(IOHIDEventSystemClientRef, IOHIDEventRef) =
     dispatch_once(&once, ^{ s = [TTHIDController new]; });
     return s;
 }
+
+- (void)setLogHandler:(void(^)(NSString *))block { self.logBlock = block; }
+- (void)log:(NSString *)m { if (self.logBlock) self.logBlock(m); }
 
 - (BOOL)setup {
     static dispatch_once_t once;
@@ -62,17 +66,20 @@ static int  (*pSystemClientDispatch)(IOHIDEventSystemClientRef, IOHIDEventRef) =
         0, p.x, p.y, 0.0, touchDown ? 0.1 : 0.0, 0.0, true, touchDown, 0);
 }
 
-- (void)_dispatch:(IOHIDEventRef)ev {
-    if (self.client) pSystemClientDispatch(self.client, ev);
+- (int)_dispatch:(IOHIDEventRef)ev label:(NSString *)label {
+    if (!self.client) return -999;
+    int ret = pSystemClientDispatch(self.client, ev);
+    [self log:[NSString stringWithFormat:@"HID %@ ret=%d", label, ret]];
+    return ret;
 }
 
 - (void)tapAt:(CGPoint)pt {
-    if (!self.client) return;
+    if (!self.client) { [self log:@"HID client nil"]; return; }
     IOHIDEventRef d = [self _event:pt phase:YES];
-    [self _dispatch:d];
+    [self _dispatch:d label:[NSString stringWithFormat:@"down(%.0f,%.0f)", pt.x, pt.y]];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
         IOHIDEventRef u = [self _event:pt phase:NO];
-        [self _dispatch:u];
+        [self _dispatch:u label:[NSString stringWithFormat:@"up(%.0f,%.0f)", pt.x, pt.y]];
         CFRelease(u);
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 150 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
@@ -82,7 +89,7 @@ static int  (*pSystemClientDispatch)(IOHIDEventSystemClientRef, IOHIDEventRef) =
 
 - (void)startRepeating:(CGPoint)pt interval:(NSTimeInterval)sec {
     [self stopRepeating];
-    if (!self.client) return;
+    if (!self.client) { [self log:@"HID client nil, cannot repeat"]; return; }
     self.repeating = YES;
     [self _repeatTick:pt interval:sec];
 }
@@ -97,11 +104,10 @@ static int  (*pSystemClientDispatch)(IOHIDEventSystemClientRef, IOHIDEventRef) =
 
 - (void)stopRepeating {
     self.repeating = NO;
+    [self log:@"stopped"];
 }
 
-- (BOOL)isRepeating {
-    return self.repeating;
-}
+- (BOOL)isRepeating { return self.repeating; }
 
 - (void)swipeFrom:(CGPoint)from to:(CGPoint)to steps:(NSInteger)steps duration:(NSTimeInterval)dur {
     if (!self.client || steps < 1) return;
@@ -115,16 +121,16 @@ static int  (*pSystemClientDispatch)(IOHIDEventSystemClientRef, IOHIDEventRef) =
     CGPoint p = CGPointMake(from.x + (to.x - from.x) * r, from.y + (to.y - from.y) * r);
     if (i == 0) {
         IOHIDEventRef d = [self _event:p phase:YES];
-        [self _dispatch:d];
+        [self _dispatch:d label:[NSString stringWithFormat:@"sw-down(%.0f,%.0f)", p.x, p.y]];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 150 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ CFRelease(d); });
     } else if (i == n) {
         IOHIDEventRef u = [self _event:p phase:NO];
-        [self _dispatch:u];
+        [self _dispatch:u label:[NSString stringWithFormat:@"sw-up(%.0f,%.0f)", p.x, p.y]];
         CFRelease(u);
         return;
     } else {
         IOHIDEventRef m = [self _event:p phase:YES];
-        [self _dispatch:m];
+        [self _dispatch:m label:[NSString stringWithFormat:@"sw-mv(%.0f,%.0f)", p.x, p.y]];
         CFRelease(m);
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(iv * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{

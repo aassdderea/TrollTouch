@@ -98,7 +98,14 @@
     _scrollView.contentSize = CGSizeMake(w, MAX(y, self.view.bounds.size.height));
 
     [self log:@"控制器已启动"];
-    BOOL ok = [[TTHIDController shared] setup];
+    TTHIDController *hid = [TTHIDController shared];
+    __weak typeof(self) ws = self;
+    [hid setLogHandler:^(NSString *msg) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [ws log:msg];
+        });
+    }];
+    BOOL ok = [hid setup];
     [self log:ok ? @"HID 系统就绪" : @"HID 初始化失败 (检查 entitlement)"];
 }
 
