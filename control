@@ -6,4 +6,4 @@ Description: Accessibility-based touch simulation plugin for TrollFools injectio
 Maintainer: wanlaicode
 Author: wanlaicode
 Section: Tweaks
-Depends: mobilesubstrate
+Depends:

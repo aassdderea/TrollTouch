@@ -1,49 +1,60 @@
 #import "TTFloatWindow.h"
 #import <dlfcn.h>
+#import <mach/mach_time.h>
 
 typedef struct __IOHIDEvent *IOHIDEventRef;
 
 static IOHIDEventRef (*IOHIDEventCreateDigitizerEvent)(
-    CFAllocatorRef allocator,
-    uint64_t timestamp,
-    uint32_t type,
-    uint32_t index,
-    uint32_t identity,
-    uint32_t eventMask,
-    uint32_t buttonMask,
-    CGFloat x,
-    CGFloat y,
-    CGFloat z,
-    CGFloat tipPressure,
-    CGFloat barrelPressure,
-    Boolean range,
-    Boolean touch,
-    uint32_t options
+    CFAllocatorRef, uint64_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+    CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, Boolean, Boolean, uint32_t
 ) = NULL;
 
-static void (*IOHIDEventSetFloatValue)(IOHIDEventRef event, int32_t field, float value) = NULL;
+static void (*IOHIDEventSetFloatValue)(IOHIDEventRef, int32_t, float) = NULL;
 
-#define kDigitizerFinger      2
-#define kDigitizerEventRange  (1 << 0)
-#define kDigitizerEventTouch  (1 << 1)
-#define kDigitizerEventAttribute (1 << 3)
+typedef void (*GSSendEventFn)(const void *record, mach_port_t port);
+
+#define kDigitizerFinger 2
+#define kDigitizerEventRange  (1<<0)
+#define kDigitizerEventTouch  (1<<1)
+#define kDigitizerEventAttr   (1<<3)
 
 static void TTLoadIOKit(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        void *ioKit = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);
-        if (ioKit) {
-            IOHIDEventCreateDigitizerEvent = dlsym(ioKit, "IOHIDEventCreateDigitizerEvent");
-            IOHIDEventSetFloatValue = dlsym(ioKit, "IOHIDEventSetFloatValue");
+        void *h = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);
+        if (h) {
+            IOHIDEventCreateDigitizerEvent = dlsym(h, "IOHIDEventCreateDigitizerEvent");
+            IOHIDEventSetFloatValue = dlsym(h, "IOHIDEventSetFloatValue");
         }
     });
 }
+
+static void TTLoadGS(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        void *h = dlopen("/System/Library/PrivateFrameworks/GraphicsServices.framework/GraphicsServices", RTLD_NOW);
+        (void)h;
+    });
+}
+
+#pragma pack(push, 4)
+typedef struct {
+    uint8_t  unk0[8];
+    int32_t  type;
+    int32_t  subtype;
+    float    x;
+    float    y;
+    float    z;
+    uint8_t  unk1[200];
+} GSEventRecord;
+#pragma pack(pop)
 
 @interface TTFloatWindow ()
 @property (nonatomic, strong) UIWindow *window;
 @property (nonatomic, assign) CGPoint targetPoint;
 @property (nonatomic, assign) NSInteger tapCount;
-@property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, strong) UILabel *logLabel;
+@property (nonatomic, strong) NSMutableString *logBuf;
 @end
 
 @implementation TTFloatWindow
@@ -63,27 +74,32 @@ static void TTLoadIOKit(void) {
             self.window.hidden = NO;
             return;
         }
+        self.logBuf = [NSMutableString new];
         [self buildWindow];
     });
 }
 
 - (UIWindowScene *)_foregroundScene {
     if (@available(iOS 13.0, *)) {
-        for (UIScene *candidate in UIApplication.sharedApplication.connectedScenes) {
-            if ([candidate isKindOfClass:[UIWindowScene class]]) {
-                UIWindowScene *windowScene = (UIWindowScene *)candidate;
-                if (windowScene.activationState == UISceneActivationStateForegroundActive) {
-                    return windowScene;
-                }
+        for (UIScene *c in UIApplication.sharedApplication.connectedScenes) {
+            if ([c isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *ws = (UIWindowScene *)c;
+                if (ws.activationState == UISceneActivationStateForegroundActive) return ws;
             }
         }
-        for (UIScene *candidate in UIApplication.sharedApplication.connectedScenes) {
-            if ([candidate isKindOfClass:[UIWindowScene class]]) {
-                return (UIWindowScene *)candidate;
-            }
+        for (UIScene *c in UIApplication.sharedApplication.connectedScenes) {
+            if ([c isKindOfClass:[UIWindowScene class]]) return (UIWindowScene *)c;
         }
     }
     return nil;
+}
+
+- (void)log:(NSString *)msg {
+    [self.logBuf appendFormat:@"%@\n", msg];
+    NSArray *lines = [self.logBuf componentsSeparatedByString:@"\n"];
+    NSUInteger max = 10;
+    NSUInteger start = lines.count > max ? lines.count - max : 0;
+    self.logLabel.text = [[lines subarrayWithRange:NSMakeRange(start, MIN(lines.count - start, max))] componentsJoinedByString:@"\n"];
 }
 
 - (void)buildWindow {
@@ -97,66 +113,79 @@ static void TTLoadIOKit(void) {
 
     self.targetPoint = CGPointMake(100, 300);
 
-    CGFloat w = 140.0;
-    CGFloat h = 170.0;
-    CGFloat x = 16.0;
-    CGFloat y = 120.0;
+    CGFloat w = 175.0;
+    CGFloat h = 260.0;  // taller for log + copy button
+    CGFloat x = 12.0;
+    CGFloat y = 100.0;
 
     UIWindow *window = [[UIWindow alloc] initWithWindowScene:scene];
     window.frame = CGRectMake(x, y, w, h);
     window.windowLevel = UIWindowLevelAlert + 1;
-    window.backgroundColor = [UIColor colorWithWhite:0.06 alpha:0.92];
+    window.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.90];
     window.layer.cornerRadius = 14.0;
     window.clipsToBounds = YES;
 
     UIViewController *root = [UIViewController new];
     root.view.backgroundColor = [UIColor clearColor];
 
-    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(12, 14, w - 24, 20)];
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(12, 12, w - 24, 20)];
     title.text = @"TrollTouch";
     title.textColor = [UIColor colorWithRed:0.3 green:0.7 blue:1.0 alpha:1.0];
-    title.font = [UIFont boldSystemFontOfSize:14];
+    title.font = [UIFont boldSystemFontOfSize:15];
     [root.view addSubview:title];
 
-    self.statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 110, w - 24, 52)];
-    self.statusLabel.text = @"等待操作...";
-    self.statusLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
-    self.statusLabel.font = [UIFont systemFontOfSize:10];
-    self.statusLabel.numberOfLines = 3;
-    [root.view addSubview:self.statusLabel];
-
-    UIButton *testBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    testBtn.frame = CGRectMake(12, 38, w - 24, 32);
-    [testBtn setTitle:@"Tap" forState:UIControlStateNormal];
-    [testBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    testBtn.backgroundColor = [UIColor colorWithRed:0.18 green:0.50 blue:0.90 alpha:1.0];
-    testBtn.layer.cornerRadius = 8.0;
-    testBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-    [testBtn addTarget:self action:@selector(doTapTest) forControlEvents:UIControlEventTouchUpInside];
-    [root.view addSubview:testBtn];
+    UIButton *tapBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    tapBtn.frame = CGRectMake(12, 38, w - 24, 34);
+    [tapBtn setTitle:@"Tap" forState:UIControlStateNormal];
+    tapBtn.backgroundColor = [UIColor colorWithRed:0.18 green:0.50 blue:0.90 alpha:1.0];
+    [tapBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    tapBtn.layer.cornerRadius = 8.0;
+    tapBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    [tapBtn addTarget:self action:@selector(doTapTest) forControlEvents:UIControlEventTouchUpInside];
+    [root.view addSubview:tapBtn];
 
     UIButton *swipeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    swipeBtn.frame = CGRectMake(12, 74, w - 24, 28);
+    swipeBtn.frame = CGRectMake(12, 76, w - 24, 30);
     [swipeBtn setTitle:@"Swipe" forState:UIControlStateNormal];
-    [swipeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    swipeBtn.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.14];
+    swipeBtn.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.12];
+    [swipeBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     swipeBtn.layer.cornerRadius = 8.0;
-    swipeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    swipeBtn.titleLabel.font = [UIFont systemFontOfSize:13];
     [swipeBtn addTarget:self action:@selector(doSwipeTest) forControlEvents:UIControlEventTouchUpInside];
     [root.view addSubview:swipeBtn];
+
+    UIButton *copyBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    copyBtn.frame = CGRectMake(12, 110, w - 24, 30);
+    [copyBtn setTitle:@"Copy Logs" forState:UIControlStateNormal];
+    copyBtn.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.12];
+    [copyBtn setTitleColor:[UIColor colorWithRed:0.3 green:0.7 blue:1.0 alpha:1.0] forState:UIControlStateNormal];
+    copyBtn.layer.cornerRadius = 8.0;
+    copyBtn.titleLabel.font = [UIFont systemFontOfSize:13];
+    [copyBtn addTarget:self action:@selector(copyLogs) forControlEvents:UIControlEventTouchUpInside];
+    [root.view addSubview:copyBtn];
+
+    self.logLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 148, w - 24, h - 156)];
+    self.logLabel.text = @"等待操作…";
+    self.logLabel.textColor = [UIColor colorWithWhite:0.72 alpha:1.0];
+    self.logLabel.font = [UIFont systemFontOfSize:9];
+    self.logLabel.numberOfLines = 0;
+    [root.view addSubview:self.logLabel];
 
     window.rootViewController = root;
     self.window = window;
     [self.window makeKeyAndVisible];
+
+    [self log:@"TrollTouch loaded"];
+    [self log:[NSString stringWithFormat:@"bundle=%@", NSBundle.mainBundle.bundleIdentifier ?: @"?"]];
 }
 
-#pragma mark - Hit
+#pragma mark - host window
 
 - (UIWindow *)_hostWindow {
     if (@available(iOS 13.0, *)) {
-        for (UIScene *candidate in UIApplication.sharedApplication.connectedScenes) {
-            if (![candidate isKindOfClass:[UIWindowScene class]]) continue;
-            UIWindowScene *ws = (UIWindowScene *)candidate;
+        for (UIScene *c in UIApplication.sharedApplication.connectedScenes) {
+            if (![c isKindOfClass:[UIWindowScene class]]) continue;
+            UIWindowScene *ws = (UIWindowScene *)c;
             if (ws.activationState != UISceneActivationStateForegroundActive) continue;
             for (UIWindow *w in ws.windows) {
                 if (w == self.window) continue;
@@ -168,131 +197,97 @@ static void TTLoadIOKit(void) {
     return (kw != self.window) ? kw : nil;
 }
 
-- (BOOL)tapAtPoint:(CGPoint)point {
+#pragma mark - tap
+
+- (void)tapDiagnoseAtPoint:(CGPoint)point {
     UIWindow *host = [self _hostWindow];
-    if (!host) {
-        self.statusLabel.text = @"没有找到宿主窗口";
-        return NO;
-    }
+    if (!host) { [self log:@"❌ host window not found"]; return; }
 
     UIView *target = [host hitTest:point withEvent:nil];
-    if (!target) {
-        target = host;
-    }
+    if (!target) target = host;
+
+    CGSize screenSize = host.bounds.size;
+    CGFloat scale = host.screen.scale;
 
     [self showTapDotAtPoint:point onWindow:host];
-    NSString *cls = NSStringFromClass(target.class);
+    [self log:[NSString stringWithFormat:@"hit=%@ scale=%.0f screen=%.0fx%.0f",
+        NSStringFromClass(target.class), scale, screenSize.width, screenSize.height]];
+    [self log:[NSString stringWithFormat:@"pt=(%.0f,%.0f) px=(%.0f,%.0f)",
+        point.x, point.y, point.x * scale, point.y * scale]];
 
-    BOOL activated = [target accessibilityActivate];
-    if (activated) {
-        self.statusLabel.text = [NSString stringWithFormat:@"✅ AX activate\n(%@)", cls];
-        self.tapCount++;
-        return YES;
+    // 1) accessibilityActivate
+    if ([target accessibilityActivate]) {
+        [self log:[NSString stringWithFormat:@"✅ AX ok (%@)", NSStringFromClass(target.class)]];
+        self.tapCount++; return;
     }
 
+    // 2) UIControl
     if ([target isKindOfClass:[UIControl class]]) {
         [(UIControl *)target sendActionsForControlEvents:UIControlEventTouchUpInside];
-        self.statusLabel.text = [NSString stringWithFormat:@"✅ UIControl\n(%@)", cls];
-        self.tapCount++;
-        return YES;
+        [self log:[NSString stringWithFormat:@"✅ UIControl (%@)", NSStringFromClass(target.class)]];
+        self.tapCount++; return;
     }
 
-    BOOL hidOk = [self tapHIDAtPoint:point];
-    if (hidOk) {
-        self.statusLabel.text = [NSString stringWithFormat:@"✅ HID event\n(%.0f,%.0f)", point.x, point.y];
-        self.tapCount++;
-        return YES;
+    // 3) HID  检查好几个可能的Selector
+    UIApplication *app = UIApplication.sharedApplication;
+    NSArray *selNames = @[@"_enqueueHIDEvent:", @"_handleHIDEvent:", @"_enqueueHIDEvent:toQueue:"];
+    SEL foundSel = NULL;
+    for (NSString *name in selNames) {
+        SEL s = NSSelectorFromString(name);
+        if ([app respondsToSelector:s]) { foundSel = s; [self log:[NSString stringWithFormat:@"HID sel=%@", name]]; break; }
     }
+    if (!foundSel) { [self log:@"❌ no HID selector"]; return; }
 
-    self.statusLabel.text = [NSString stringWithFormat:@"⚠️ 全部失败\n(%@)", cls];
-    return NO;
-}
-
-#pragma mark - HID
-
-- (SEL)_findEnqueueSelector {
-    NSArray *candidates = @[
-        @"_enqueueHIDEvent:",
-        @"_handleHIDEvent:",
-        @"enqueueHIDEvent:"
-    ];
-    UIApplication *app = [UIApplication sharedApplication];
-    for (NSString *name in candidates) {
-        SEL sel = NSSelectorFromString(name);
-        if ([app respondsToSelector:sel]) {
-            return sel;
-        }
-    }
-    return NULL;
-}
-
-- (BOOL)tapHIDAtPoint:(CGPoint)point {
     TTLoadIOKit();
-    if (!IOHIDEventCreateDigitizerEvent) {
-        return NO;
-    }
+    [self log:[NSString stringWithFormat:@"IOKitCreateFn=%s", IOHIDEventCreateDigitizerEvent ? "ok" : "nil"]];
 
-    SEL sel = [self _findEnqueueSelector];
-    if (!sel) {
-        return NO;
-    }
-    UIApplication *app = [UIApplication sharedApplication];
-    typedef void (*EnqueueFn)(id, SEL, IOHIDEventRef);
-    EnqueueFn enqueue = (EnqueueFn)[app methodForSelector:sel];
+    if (!IOHIDEventCreateDigitizerEvent) { [self log:@"❌ IOKit fn nil"]; return; }
+
+    typedef void (*EFn)(id, SEL, IOHIDEventRef);
+    EFn enq = (EFn)[app methodForSelector:foundSel];
 
     IOHIDEventRef down = IOHIDEventCreateDigitizerEvent(
-        kCFAllocatorDefault,
-        mach_absolute_time(),
-        kDigitizerFinger,
+        kCFAllocatorDefault, mach_absolute_time(),
+        kDigitizerFinger, 0, 1,
+        kDigitizerEventRange | kDigitizerEventTouch | kDigitizerEventAttr,
         0,
-        1,
-        kDigitizerEventRange | kDigitizerEventTouch | kDigitizerEventAttribute,
-        0,
-        point.x, point.y, 0.0,
-        0.1,    // tipPressure
-        0.0,
-        true,   // range
-        true,   // touch
-        0
+        point.x, point.y, 0.0, 0.1, 0.0, true, true, 0
     );
-
     if (IOHIDEventSetFloatValue) {
         IOHIDEventSetFloatValue(down, 720896, (float)point.x);
         IOHIDEventSetFloatValue(down, 720897, (float)point.y);
     }
+    enq(app, foundSel, down);
+    [self log:@"HID down enqueued"];
 
-    enqueue(app, sel, down);
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(50 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(80 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
         IOHIDEventRef up = IOHIDEventCreateDigitizerEvent(
-            kCFAllocatorDefault,
-            mach_absolute_time(),
-            kDigitizerFinger,
-            0, 1,
-            kDigitizerEventRange | kDigitizerEventTouch | kDigitizerEventAttribute,
+            kCFAllocatorDefault, mach_absolute_time(),
+            kDigitizerFinger, 0, 1,
+            kDigitizerEventRange | kDigitizerEventTouch | kDigitizerEventAttr,
             0,
-            point.x, point.y, 0.0,
-            0.0, 0.0,
-            true,
-            false,
-            0
+            point.x, point.y, 0.0, 0.0, 0.0, true, false, 0
         );
-
         if (IOHIDEventSetFloatValue) {
             IOHIDEventSetFloatValue(up, 720896, (float)point.x);
             IOHIDEventSetFloatValue(up, 720897, (float)point.y);
         }
-
-        enqueue(app, sel, up);
+        enq(app, foundSel, up);
         CFRelease(up);
+        [weakSelf log:@"HID up enqueued"];
     });
 
-    CFRelease(down);
+    // hold down ref until up fires
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(150 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        CFRelease(down);
+    });
 
-    UIWindow *host = [self _hostWindow];
-    [self showTapDotAtPoint:point onWindow:host];
-    return YES;
+    [self log:@"HID path deployed"];
+    self.tapCount++;
 }
+
+#pragma mark - dot
 
 - (void)showTapDotAtPoint:(CGPoint)point onWindow:(UIWindow *)host {
     if (!host) return;
@@ -304,26 +299,27 @@ static void TTLoadIOKit(void) {
     dot.layer.cornerRadius = size / 2.0;
     dot.userInteractionEnabled = NO;
     [host addSubview:dot];
-
     [UIView animateWithDuration:0.45 animations:^{
         dot.transform = CGAffineTransformMakeScale(1.8, 1.8);
         dot.alpha = 0.0;
-    } completion:^(BOOL finished) {
-        [dot removeFromSuperview];
-    }];
+    } completion:^(BOOL f) { [dot removeFromSuperview]; }];
+}
+
+#pragma mark - log copy
+
+- (void)copyLogs {
+    [UIPasteboard generalPasteboard].string = self.logBuf ?: @"no logs";
+    [self log:@"📋 copied to pasteboard"];
 }
 
 #pragma mark - actions
 
 - (void)doTapTest {
-    [self tapAtPoint:self.targetPoint];
+    [self tapDiagnoseAtPoint:self.targetPoint];
 }
 
 - (void)doSwipeTest {
-    self.statusLabel.text = @"Swipe...";
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self runSwipeFrom:CGPointMake(200, 600) to:CGPointMake(200, 300) steps:10 interval:0.018];
-    });
+    [self runSwipeFrom:CGPointMake(200, 600) to:CGPointMake(200, 300) steps:8 interval:0.022];
 }
 
 - (void)runSwipeFrom:(CGPoint)from to:(CGPoint)to steps:(NSInteger)steps interval:(NSTimeInterval)interval {
@@ -331,19 +327,13 @@ static void TTLoadIOKit(void) {
 }
 
 - (void)dispatchSwipeStepFrom:(CGPoint)from to:(CGPoint)to step:(NSInteger)step total:(NSInteger)total interval:(NSTimeInterval)interval {
-    if (step > total) {
-        self.statusLabel.text = @"✅ Swipe done";
-        return;
-    }
-    CGFloat ratio = (CGFloat)step / (CGFloat)total;
-    CGPoint point = CGPointMake(
-        from.x + (to.x - from.x) * ratio,
-        from.y + (to.y - from.y) * ratio
-    );
-    [self tapHIDAtPoint:point];
-
+    if (step > total) { [self log:@"✅ Swipe done"]; return; }
+    CGFloat r = (CGFloat)step / total;
+    CGPoint p = CGPointMake(from.x + (to.x - from.x) * r, from.y + (to.y - from.y) * r);
+    [self tapDiagnoseAtPoint:p];
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(interval * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self dispatchSwipeStepFrom:from to:to step:step + 1 total:total interval:interval];
+        [weakSelf dispatchSwipeStepFrom:from to:to step:step + 1 total:total interval:interval];
     });
 }
 
