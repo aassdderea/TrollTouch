@@ -1,46 +1,39 @@
-# TrollTouch - ESign 注入版
+# TrollTouch - ESign 注入版 v2
 
 注入目标 App 后自动扫描并跳过广告/弹窗。
 
-## 核心能力
-- **自动扫描**：注入后 3 秒自动扫描视图树，找到"跳过/关闭/知道了"按钮自动点击
-- **HID 坐标点击**：手动发送坐标指令，通过 ESign entitlement 获得真正 HID 权限
-- **关键词匹配**：内置 20+ 中文/英文跳过关键词
-- **文件日志**：`/var/mobile/Library/Preferences/com.trolltouch.log.txt`
+## 核心升级 (v2)
+- **日志写入沙盒 Documents 目录**，可用 Filza 直接查看
+- **屏幕左上角状态标签**，直观显示 dylib 运行状态
+- **注入后 4 秒自动开始扫描**（2 秒初始化 + 2 秒延迟）
+- 关键词覆盖 20+ 种常见关闭/跳过按钮
+
+## 状态标签含义
+| 颜色 | 文字 | 含义 |
+|------|------|------|
+| 绿色 | 已加载 ✓ | dylib 加载成功 |
+| 蓝色 | 扫描中… | 正在扫描视图树 |
+| 绿色 | 已点击 ✓ | 找到并点击了按钮 |
+| 黄色 | 等待窗口… | 窗口未准备好 |
+| 灰色 | 已停止 | 扫描已停止 |
 
 ## 使用步骤
 
-### 1. 编译 dylib
-推送到 GitHub → Actions 自动编译 → 下载 `TrollTouch.dylib`
+### 1. 编译
+推送 GitHub → Actions 下载 `TrollTouch.dylib`
 
-### 2. ESign 重签目标 App
+### 2. ESign 重签 + 注入
+1. 砸壳目标 App → 得到 IPA
+2. ESign 导入 IPA
+3. 注入 `TrollTouch.dylib`
+4. 导入 `entitlements.plist`（可选）
+5. 签名 → TrollStore 安装
+
+### 3. 验证
+- 打开 App，屏幕左上角应出现绿色 "TT: 已加载 ✓"
+- 广告出现后自动变为 "TT: 已点击 ✓"
+
+### 4. 查看日志
 ```
-1. 砸壳目标 App → 得到 App.ipa
-2. 打开 ESign → 导入 App.ipa
-3. 注入 dylib: 选择 TrollTouch.dylib
-4. Entitlements: 导入 entitlements.plist
-5. 签名 → 安装到 TrollStore
+Filza → /var/mobile/Containers/Data/Application/{UUID}/Documents/com.trolltouch.log.txt
 ```
-
-### 3. 自动跳过广告
-- ESign 安装后打开目标 App
-- dylib 自动启动，每 1 秒扫描一次
-- 发现"跳过"按钮自动点击
-- 日志文件实时查看运行状态
-
-### 4. 手动控制（可选）
-```bash
-# 自动扫描模式
-sh scripts/auto_skip.sh
-
-# 坐标点击模式
-sh scripts/tap.sh 200 400
-
-# 查看日志
-cat /var/mobile/Library/Preferences/com.trolltouch.log.txt
-```
-
-## 文件
-- 核心代码: `TrollTouch.m`
-- ESign 用的 entitlements: `entitlements.plist`
-- 编译: `make package` → `packages/TrollTouch.dylib`
