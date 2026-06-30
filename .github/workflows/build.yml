@@ -16,18 +16,13 @@ jobs:
           git clone --recursive https://github.com/theos/theos.git $HOME/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
-      - name: Install ldid
-        run: brew install ldid
-
-      - name: Build dylib
+      - name: Build IPA
         run: |
           export THEOS=$HOME/theos
-          make clean package
+          make clean all
 
-      - name: Upload artifacts
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: TrollTouch-build
-          path: |
-            packages/TrollTouch.dylib
-            README.md
+          name: TrollTouch-IPA
+          path: packages/TrollTouch.ipa

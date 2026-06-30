@@ -1,33 +1,22 @@
-# TrollTouch
+# TrollTouch - 控制器 IPA
 
-TrollFools 注入版悬浮窗插件，支持诊断日志。
+带 HID entitlement 的独立应用，通过 TrollStore 安装后可在后台向系统发送触摸事件，控制任意前台 App。
 
 ## 功能
-- 注入目标 App 后自动显示悬浮窗
-- `Tap` — 对固定坐标执行点击（红圈反馈 + 诊断日志）
-- `Swipe` — 对固定区域执行滑动
-- `Copy Logs` — 复制完整诊断日志到剪贴板
+- **单次 Tap**：在指定坐标执行一次点击
+- **循环点击**：按设定间隔持续点击
+- **滑动**：从起点到终点平滑滑动
+- **后台运行**：切到目标 App 后可继续发触摸
+- **日志**：复制日志方便诊断
+
+## 安装
+1. 从 GitHub Actions 下载 `TrollTouch.ipa`
+2. 用 TrollStore 打开安装
+3. 打开 TrollTouch → 设置坐标 → 点"开始循环"
+4. 切到目标 App → 系统会把触摸事件投递给前台 App
+
+## 原理
+TrollStore 安装时注入 `com.apple.private.hid.client.event-dispatch` entitlement，使 App 可以通过 IOHIDEventSystemClient 向系统发送触摸事件，系统自动投递给前台 App。
 
 ## 编译
-- 推送到 GitHub 后自动执行 `.github/workflows/build.yml`
-- 产物为 `packages/TrollTouch.dylib`
-
-## 使用
-1. 用 TrollFools 注入 `TrollTouch.dylib`
-2. 重启目标 App
-3. 进入 App 后会显示悬浮窗
-4. 点 `Tap` 测试点击，日志区会显示每一步诊断
-5. 点 `Copy Logs` 粘贴出来分析
-
-## 点击路径（按顺序尝试）
-1. `accessibilityActivate`
-2. `UIControl sendActionsForControlEvents:`
-3. IOHIDEvent + `_enqueueHIDEvent:` / `_handleHIDEvent:`
-
-## 注意事项
-- 若 `_enqueueHIDEvent:` 不生效，可能需要注入到的 App 具有 `com.apple.private.hid.client.event-dispatch` entitlement
-- 该 entitlement 可通过 TrollStore 签名时注入到目标 IPA
-
-## 文件
-- 入口: `TrollTouch.m`
-- 悬浮窗: `TTFloatWindow.m`
+推送到 GitHub，Actions 自动产出 `TrollTouch.ipa`。

@@ -1,9 +1,0 @@
-Package: com.trolltouch.plugin
-Name: TrollTouch
-Version: 1.0.0
-Architecture: iphoneos-arm
-Description: Accessibility-based touch simulation plugin for TrollFools injection
-Maintainer: wanlaicode
-Author: wanlaicode
-Section: Tweaks
-Depends:
