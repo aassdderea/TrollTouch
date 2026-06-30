@@ -24,24 +24,59 @@ static NSTimer *_scanTimer;
 static NSArray *_skipKeywords;
 static NSString *_currentMode;
 static UILabel *_statusLabel;
+static UIWindow *_statusWindow;
 
-static void TTLog(NSString *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
-    va_end(args);
-    NSDateFormatter *df = [NSDateFormatter new];
-    df.dateFormat = @"HH:mm:ss";
-    NSString *line = [NSString stringWithFormat:@"[%@] %@\n", [df stringFromDate:[NSDate date]], msg];
+static void TTUpdateStatusLabel(NSString *text, UIColor *color) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!_statusLabel) return;
+        _statusLabel.text = text;
+        _statusLabel.backgroundColor = color;
+    });
+}
 
-    if (!_logHandle) {
-        NSFileManager *fm = [NSFileManager defaultManager];
-        NSString *dir = [kLogPath stringByDeletingLastPathComponent];
-        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-        [fm createFileAtPath:kLogPath contents:nil attributes:nil];
-        _logHandle = [NSFileHandle fileHandleForWritingAtPath:kLogPath];
-        [_logHandle seekToEndOfFile];
-    }
+static void TTShowStatusLabel(void) {
+    if (_statusLabel) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindowScene *scene = nil;
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *c in UIApplication.sharedApplication.connectedScenes) {
+                if ([c isKindOfClass:[UIWindowScene class]] && c.activationState == UISceneActivationStateForegroundActive) {
+                    scene = (UIWindowScene *)c; break;
+                }
+            }
+            if (!scene) {
+                for (UIScene *c in UIApplication.sharedApplication.connectedScenes) {
+                    if ([c isKindOfClass:[UIWindowScene class]]) { scene = (UIWindowScene *)c; break; }
+                }
+            }
+        }
+        if (!scene) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                TTShowStatusLabel();
+            });
+            return;
+        }
+
+        _statusWindow = [[UIWindow alloc] initWithWindowScene:scene];
+        _statusWindow.frame = CGRectMake(8, 50, 160, 22);
+        _statusWindow.windowLevel = UIWindowLevelAlert + 100;
+        _statusWindow.backgroundColor = [UIColor clearColor];
+        _statusWindow.userInteractionEnabled = NO;
+
+        _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 160, 22)];
+        _statusLabel.font = [UIFont boldSystemFontOfSize:11];
+        _statusLabel.textColor = UIColor.whiteColor;
+        _statusLabel.textAlignment = NSTextAlignmentCenter;
+        _statusLabel.layer.cornerRadius = 6;
+        _statusLabel.clipsToBounds = YES;
+        _statusLabel.text = @"TT: 已加载 ✓";
+        _statusLabel.backgroundColor = [UIColor colorWithRed:0.0 green:0.6 blue:0.2 alpha:0.8];
+        [_statusWindow addSubview:_statusLabel];
+        _statusWindow.hidden = NO;
+
+        TTLog(@"独立状态窗口已创建");
+    });
+}
     @try {
         [_logHandle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
         [_logHandle synchronizeFile];
@@ -56,12 +91,12 @@ static UIWindow *TTActiveWindow(void) {
             UIWindowScene *ws = (UIWindowScene *)c;
             if (ws.activationState != UISceneActivationStateForegroundActive) continue;
             for (UIWindow *w in ws.windows) {
-                if (!w.isHidden && w.alpha > 0.01 && w != _statusLabel.window) return w;
+                if (!w.isHidden && w.alpha > 0.01 && w != _statusWindow) return w;
             }
         }
     }
     UIWindow *kw = UIApplication.sharedApplication.keyWindow;
-    return (kw != _statusLabel.window) ? kw : nil;
+    return (kw != _statusWindow) ? kw : nil;
 }
 
 static UIView *TTFindSkipButtonInView(UIView *root) {
@@ -166,28 +201,52 @@ static void TTTapHIDAtPoint(CGPoint pt) {
         void *h = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);
         if (h) IOHIDEventCreateDigitizerEvent = dlsym(h, "IOHIDEventCreateDigitizerEvent");
     });
-    if (!IOHIDEventCreateDigitizerEvent) { TTLog(@"HID: IOKit nil"); return; }
+    if (!IOHIDEventCreateDigitizerEvent) {
+        TTLog(@"HID FAIL: IOKitCreateDigitizer nil");
+        TTUpdateStatusLabel(@"TT: HID IOKit缺失", [UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:0.8]);
+        return;
+    }
     SEL sel = NSSelectorFromString(@"_enqueueHIDEvent:");
     UIApplication *app = UIApplication.sharedApplication;
-    if (![app respondsToSelector:sel]) { TTLog(@"HID: selector nil"); return; }
+    if (![app respondsToSelector:sel]) {
+        TTLog(@"HID FAIL: _enqueueHIDEvent: not found");
+        TTUpdateStatusLabel(@"TT: HID方法缺失", [UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:0.8]);
+        return;
+    }
     typedef void (*EFn)(id, SEL, IOHIDEventRef);
     EFn enq = (EFn)[app methodForSelector:sel];
 
-    IOHIDEventRef down = IOHIDEventCreateDigitizerEvent(
-        kCFAllocatorDefault, mach_absolute_time(),
-        kFinger, 0, 1, kRange | kTouch | kAttr,
-        0, pt.x, pt.y, 0.0, 0.1, 0.0, true, true, 0);
-    enq(app, sel, down);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-        IOHIDEventRef up = IOHIDEventCreateDigitizerEvent(
+    @try {
+        IOHIDEventRef down = IOHIDEventCreateDigitizerEvent(
             kCFAllocatorDefault, mach_absolute_time(),
             kFinger, 0, 1, kRange | kTouch | kAttr,
-            0, pt.x, pt.y, 0.0, 0.0, 0.0, true, false, 0);
-        enq(app, sel, up);
-        CFRelease(up);
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ CFRelease(down); });
-    TTLog(@"HID tap (%.0f,%.0f)", pt.x, pt.y);
+            0, pt.x, pt.y, 0.0, 0.1, 0.0, true, true, 0);
+        enq(app, sel, down);
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+            IOHIDEventRef up = IOHIDEventCreateDigitizerEvent(
+                kCFAllocatorDefault, mach_absolute_time(),
+                kFinger, 0, 1, kRange | kTouch | kAttr,
+                0, pt.x, pt.y, 0.0, 0.0, 0.0, true, false, 0);
+            enq(app, sel, up);
+            CFRelease(up);
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+            CFRelease(down);
+        });
+
+        TTLog(@"HID SENT: (%.0f,%.0f) ent=%@ sel=_enqueueHIDEvent:",
+              pt.x, pt.y, [app respondsToSelector:sel] ? @"ok" : @"nil");
+        TTUpdateStatusLabel(
+            [NSString stringWithFormat:@"TT: HID (%.0f,%.0f)", pt.x, pt.y],
+            [UIColor colorWithRed:0.9 green:0.5 blue:0.0 alpha:0.8]);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            TTUpdateStatusLabel(@"TT: 扫描中…", [UIColor colorWithRed:0.1 green:0.4 blue:0.8 alpha:0.8]);
+        });
+    } @catch (NSException *e) {
+        TTLog(@"HID CRASH: %@", e);
+        TTUpdateStatusLabel(@"TT: HID崩溃", [UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:0.8]);
+    }
 }
 
 #pragma mark - command
@@ -234,14 +293,14 @@ __attribute__((constructor)) static void TrollTouchInit(void) {
     kCommandPath = [docs stringByAppendingPathComponent:@"com.trolltouch.command.plist"];
     kLogPath     = [docs stringByAppendingPathComponent:@"com.trolltouch.log.txt"];
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         _skipKeywords = @[@"跳过", @"关闭", @"知道了", @"好的", @"同意",
                           @"skip", @"close", @"Skip", @"Close",
                           @"领取", @"签到", @"确定", @"允许", @"继续",
                           @"立刻体验", @"立即体验", @"马上体验",
                           @"×", @"✕", @"X"];
 
-        TTLog(@"TrollTouch v2.0 loaded");
+        TTLog(@"TrollTouch v2.1 loaded");
         TTLog(@"bundle=%@", NSBundle.mainBundle.bundleIdentifier ?: @"?");
         TTLog(@"logPath=%@", kLogPath);
 
@@ -252,7 +311,7 @@ __attribute__((constructor)) static void TrollTouchInit(void) {
             (void)t; TTHandleCommand();
         });
 
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (!_scanTimer && ![_currentMode isEqualToString:@"auto"]) {
                 TTStartAutoScan();
                 TTLog(@"自动扫描已启动");
