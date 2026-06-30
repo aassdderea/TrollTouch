@@ -11,7 +11,6 @@ static IOHIDEventRef (*IOHIDEventCreateDigitizerEvent)(
 
 static void (*IOHIDEventSetFloatValue)(IOHIDEventRef, int32_t, float) = NULL;
 
-typedef void (*GSSendEventFn)(const void *record, mach_port_t port);
 
 #define kDigitizerFinger 2
 #define kDigitizerEventRange  (1<<0)
@@ -29,25 +28,7 @@ static void TTLoadIOKit(void) {
     });
 }
 
-static void TTLoadGS(void) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        void *h = dlopen("/System/Library/PrivateFrameworks/GraphicsServices.framework/GraphicsServices", RTLD_NOW);
-        (void)h;
-    });
-}
 
-#pragma pack(push, 4)
-typedef struct {
-    uint8_t  unk0[8];
-    int32_t  type;
-    int32_t  subtype;
-    float    x;
-    float    y;
-    float    z;
-    uint8_t  unk1[200];
-} GSEventRecord;
-#pragma pack(pop)
 
 @interface TTFloatWindow ()
 @property (nonatomic, strong) UIWindow *window;
